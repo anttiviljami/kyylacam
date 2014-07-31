@@ -9,9 +9,13 @@
 
 var sys = require('sys');
 var util = require('util');
-var exec = require('child_process').exec;
 
-var motionbin = '/usr/bin/motion -c %s';
+var child_process = require('child_process'),
+    exec = child_process.exec,
+    spawn = child_process.spawn;
+
+var motion;
+var motioncmd = '/usr/bin/motion';
 var motionconf = './motion.conf';
 
 (function () {
@@ -25,7 +29,7 @@ var motionconf = './motion.conf';
     // leave process running after script execution
     process.stdin.resume();
 
-    // start motion daemon
+    // start motion
     startMotion();
   
   }
@@ -41,28 +45,35 @@ var motionconf = './motion.conf';
   }
 
   /*
-   * Starts motion daemon
+   * Starts motion
    */
   function startMotion(callback) {
     console.log('Starting motion...');
-    exec(
-      util.format(motionbin, motionconf), 
-      function(error, stdout, stderr) {
-        puts(error, stdout, stderr);
-        typeof callback === 'function' ? callback() : null;  
-      }
+    
+    // spawn child process
+    motion = spawn(
+      motioncmd, 
+      ['-c', motionconf]
     );
+
+    // event handlers for motion
+    motion.stdout.on('data', function (data) {
+      process.stdout.write(data);
+    });
+
+    motion.stderr.on('data', function (data) {
+      //process.stdout.write('stderr: ' + data);
+    });
+
+    motion.on('close', function (code) {
+      console.log('motion exited with code ' + code);
+    });
+
   }
 
   function stopMotion(callback) {
-    console.log('Stopping motion...');
-    exec(
-      'pkill motion', 
-      function(error, stdout, stderr) {
-        puts(error, stdout, stderr);
-        typeof callback === 'function' ? callback() : null;  
-      }
-    );
+    // kill the process
+    motion.kill();
   }
 
   /*
