@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Start kyyla server
+/usr/bin/nodejs kyyla.js $@
+
