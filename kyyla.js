@@ -16,6 +16,7 @@ var child_process = require('child_process'),
 var _ = require('underscore');
 var hid = require('hidstream');
 var rmdir = require('rimraf');
+var dateformat = require('dateformat');
 
 
 /*
@@ -29,7 +30,7 @@ var comparecmd = 'compare -metric AE -fuzz %s %s %s /dev/null';
 var alertcmd = '/bin/bash ./alert.sh';
 var resetkey = 40; // keycode with which you can reset reference frame
 var snapshotcmd = 'wget --quiet -O /dev/null 127.0.01:8080/0/action/snapshot';
-
+var capturedir = './capture';
 
 /*
  * Global variables
@@ -38,18 +39,19 @@ var args = process.argv;
 var verbose = args.indexOf('-v') != -1
             || args.indexOf('--verbose') != -1;
 
+var alertmode = false;
 var Keyboard;
 var motion;
-var frames = [];
-var eid;
-var referenceFrame;
 var setref = false;
+var eid;
+var frames = [];
+var referenceFrame;
 
 /*
  * Initalization 
  */
 function init() {
-  log('Kyyla server starting...', 'always');
+  log('Kyylacam server starting...', 'always');
   
   // leave process running after script execution
   process.stdin.resume();
@@ -57,8 +59,12 @@ function init() {
   // clear old captures
   rmdir('capture', function(error){});
 
+  // TODO: start a http fileserver for serving capture images
+  // console.log('Kyyla server listening on port 80.');
+
   // init keyboard
-  initKeyboard();
+  if(hid.getDevices().length) 
+    initKeyboard(hid.getDevices()[0].path);
 
   // start motion
   startMotion();
@@ -67,17 +73,18 @@ function init() {
 /*
  * Initalize keyboard listener 
  */
-function initKeyboard() {
+function initKeyboard(path) {
   // get keyboard access
-  var path = hid.getDevices()[0].path;
   Keyboard = new hid.device(path);
 
   Keyboard.on("data", function(dat) {
-    // console.log(dat); 
+    console.log(dat); 
     if(dat.keyCodes.indexOf(40) != -1) {
       // Return key pressed
       setReference();
     }
+
+    alertmode = false;
   });
 }
 
@@ -269,6 +276,7 @@ function compareFramesRef(before, after, fuzz) {
       // run the alert command
       log('Changes detected. Run alert sequence.');
       exec(alertcmd, puts);
+      alertmode = true;
     } 
 
     else {
@@ -313,8 +321,9 @@ function puts(error, stdout, stderr) {
  * Verbose mode dependant logging
  */
 function log(input, mode) {
+  var timestamp = dateformat(new Date(), 'isoDateTime');
   if (verbose || mode === 'always')
-    console.log(input);
+    console.log(timestamp + ' -- ' + input);
 }
 
 /*
@@ -327,7 +336,8 @@ function exitHandler(err) {
   log("Stopping motion detection and exiting...");
   
   // close keyboard HID to prevent process from hanging
-  Keyboard.device.close();
+  if(Keyboard !== undefined)
+    Keyboard.device.close();
 
   // kill motion child process
   motion.kill();

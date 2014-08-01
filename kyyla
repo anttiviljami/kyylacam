@@ -1,6 +1,6 @@
 #!/bin/bash
 
 cd $(dirname "${BASH_SOURCE[0]}")
-# Start kyyla server
-/usr/bin/nodejs ./kyyla.js $@
 
+# Start Kyylacam server
+/usr/bin/nodejs ./kyyla.js $@
