@@ -14,7 +14,22 @@ var child_process = require('child_process'),
     spawn = child_process.spawn;
 
 var _ = require('underscore');
+var hid = require('hidstream');
 var rmdir = require('rimraf');
+
+
+/*
+ * Config
+ */
+var eventFuzz = '20%';
+var referenceFuzz = '20%';
+var motioncmd = 'motion';
+var motionconf = './motion.conf';
+var comparecmd = 'compare -metric AE -fuzz %s %s %s /dev/null';
+var alertcmd = '/bin/bash ./alert.sh';
+var resetkey = 40; // keycode with which you can reset reference frame
+var snapshotcmd = 'wget --quiet -O /dev/null 127.0.01:8080/0/action/snapshot';
+
 
 /*
  * Global variables
@@ -23,18 +38,12 @@ var args = process.argv;
 var verbose = args.indexOf('-v') != -1
             || args.indexOf('--verbose') != -1;
 
+var Keyboard;
 var motion;
 var frames = [];
 var eid;
 var referenceFrame;
-
-/*
- * Config
- */
-var motioncmd = 'motion';
-var motionconf = './motion.conf';
-var comparecmd = 'compare -metric AE -fuzz 20% %s %s /dev/null';
-var alertcmd = '/bin/bash ./alert.sh';
+var setref = false;
 
 /*
  * Initalization 
@@ -48,10 +57,41 @@ function init() {
   // clear old captures
   rmdir('capture', function(error){});
 
+  // init keyboard
+  initKeyboard();
+
   // start motion
   startMotion();
 }
 
+/*
+ * Initalize keyboard listener 
+ */
+function initKeyboard() {
+  // get keyboard access
+  var path = hid.getDevices()[0].path;
+  Keyboard = new hid.device(path);
+
+  Keyboard.on("data", function(dat) {
+    // console.log(dat); 
+    if(dat.keyCodes.indexOf(40) != -1) {
+      // Return key pressed
+      setReference();
+    }
+  });
+}
+
+/*
+ * Sets / Resets reference frame
+ */
+function setReference() {
+  log('Setting reference frame...', 'always');
+
+  // take snapshot
+  exec(snapshotcmd, function() {
+    setref = true;
+  });
+}
 
 /*
  * Launches motion tracking
@@ -90,10 +130,12 @@ function startMotion() {
     }
 
     if(response.action ===  'motion_detected') {
-      // 
+      // trigger onMotionDetect event
+      onMotionDetect(response);
     }
 
     if(response.action ===  'picture_save') {
+      // trigger onPictureSave event
       onPictureSave(response);
     }
     
@@ -132,7 +174,6 @@ function startMotion() {
  */
 function onMovementStart(response) {
   log('Motion Started!', 'always');
-  log('Event: ' + response.eventid, 'always')
 }
 
 
@@ -141,7 +182,13 @@ function onMovementStart(response) {
  */
 function onMovementEnd(response) {
   log('Motion Ended', 'always');
-  log('Event: ' + response.eventid, 'always')
+}
+
+/*
+ * No movement for x amount of seconds
+ */
+function onMotionDetect(response) {
+  log('Detecting motion...', 'always');
 }
 
 /*
@@ -149,22 +196,30 @@ function onMovementEnd(response) {
  */
 function onPictureSave(response) {
   
-  eid = parseInt(response.eventid);
-  if(frames[eid] === undefined) {
-    frames[eid] = [];
-    var compare = eid > 1;
-  }
+  if(!setref) {
+    eid = parseInt(response.eventid);
+    if(frames[eid] === undefined) {
+      frames[eid] = [];
+      var compare = eid > 1;
+    }
 
-  frames[eid].push(response.img);
-  log('Image captured: ' + _.last(frames[eid]), 'always');
-  log('Event: ' + response.eventid, 'always');
+    frames[eid].push(response.img);
+    log('Image captured: ' + _.last(frames[eid]));
 
-  if(compare) {
-    // compare first frames of previous and current events
-    compareFrames(_.first(frames[eid - 1]), _.first(frames[eid]));
+    if(compare) {
+      // compare first frames of previous and current events
+      compareFrames(_.first(frames[eid - 1]), _.first(frames[eid]), eventFuzz);
 
-    // drop the snapshot comparison frame
-    frames[eid].splice(0, 1);
+      // drop the snapshot comparison frame
+      frames[eid].splice(0, 1);
+    }
+  } 
+
+  else {
+    // setting reference frame
+    setref = false;
+    referenceFrame = response.img;
+    log('ReferenceFrame set to: ' + referenceFrame, 'always');
   }
   
 }
@@ -172,13 +227,12 @@ function onPictureSave(response) {
 /*
  * Compares two images and outputs the distortion
  */
-function compareFrames(before, after) {
-  log('Comparing frames...', 'always');
-  //log('before:' + before, 'always');
-  //log('after:' + after, 'always');
-  var cmd = util.format(comparecmd, before, after);
+function compareFrames(before, after, fuzz) {
   
-  //log(cmd, 'always');
+  log('Comparing frames...', 'always');
+  var cmd = util.format(comparecmd, fuzz, before, after);
+  
+  log(cmd);
   exec(cmd, function(error, stdout, stderr) {
     var result = parseInt(stderr + '');
 
@@ -186,12 +240,40 @@ function compareFrames(before, after) {
 
     if(result > 0) {
       // scene has changed, run alert
-      onSceneChange(); 
+      onSceneChange(after); 
     } 
 
     else {
       // scene hasn't changed
-      log('No changes to scene detected.', 'always');
+      log('OK. No changes to scene detected.', 'always');
+    }
+    // puts(error, stdout, stderr);
+  });
+}
+
+/*
+ * Compares a frame to reference image with possibly different lighting
+ */
+function compareFramesRef(before, after, fuzz) {
+  
+  log('Comparing frames...', 'always');
+  var cmd = util.format(comparecmd, fuzz, before, after);
+  
+  log(cmd);
+  exec(cmd, function(error, stdout, stderr) {
+    var result = parseInt(stderr + '');
+
+    log('Distortion: ' + result, 'always');
+
+    if(result > 0) {
+      // run the alert command
+      log('Changes detected. Run alert sequence.');
+      exec(alertcmd, puts);
+    } 
+
+    else {
+      // scene hasn't changed
+      log('OK. No changes to reference scene detected.', 'always');
     }
     // puts(error, stdout, stderr);
   });
@@ -200,17 +282,19 @@ function compareFrames(before, after) {
 /*
  * When a scene change has been detected
  */
-function onSceneChange() {
+function onSceneChange(after) {
   log('Scene change detected!', 'always');
-  log('Event: ' + eid, 'always');
 
   //
   if(referenceFrame !== undefined) {
-    log('asd', 'always');
+    log('Comparing to reference frame...', 'always');
+    compareFramesRef(referenceFrame, after, referenceFuzz);
+  }
+  else {
+    log('Reference frame not set. Proceeding...');
+    log('Keypress ' + resetkey + ' required on host to set reference frame.')
   }
 
-  // run the alert command
-  exec(alertcmd, puts);
 }
 
 /*
@@ -236,22 +320,20 @@ function log(input, mode) {
 /*
  * Termination handling and clean up
  */
-process.on('exit', exitHandler.bind(null,{cleanup:true}));
-process.on('SIGINT', exitHandler.bind(null, {exit:true}));
-process.on('uncaughtException', exitHandler.bind(null, {exit:true}));
-function exitHandler(options, err) {
-
-  // clean up
-  if (options.cleanup) {
-    // stop the motion child process
-    log('Stopping motion tracking and exiting...')
-    motion.kill();
-    process.exit();
-  }
+process.on('exit', exitHandler);
+process.on('SIGINT', exitHandler);
+process.on('uncaughtException', exitHandler);
+function exitHandler(err) {
+  log("Stopping motion detection and exiting...");
   
-  if (err) log(err.stack);
-  if (options.exit) process.exit();
+  // close keyboard HID to prevent process from hanging
+  Keyboard.device.close();
+
+  // kill motion child process
+  motion.kill();
+
+  // kill main process
+  process.exit();
 }
 
 init();
-
