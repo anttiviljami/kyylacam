@@ -24,8 +24,5 @@ build/Release
 # see https://npmjs.org/doc/faq.html#Should-I-check-my-node_modules-folder-into-git
 node_modules
 
-# A null file is generated for some reason
-null
-
 # Ignore captured images
 capture

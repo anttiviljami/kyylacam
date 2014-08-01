@@ -26,13 +26,14 @@ var verbose = args.indexOf('-v') != -1
 var motion;
 var frames = [];
 var eid;
+var referenceFrame;
 
 /*
  * Config
  */
 var motioncmd = 'motion';
 var motionconf = './motion.conf';
-var comparecmd = 'compare -metric AE -fuzz 20% %s %s null';
+var comparecmd = 'compare -metric AE -fuzz 20% %s %s /dev/null';
 var alertcmd = '/bin/bash ./alert.sh';
 
 /*
@@ -202,7 +203,12 @@ function compareFrames(before, after) {
 function onSceneChange() {
   log('Scene change detected!', 'always');
   log('Event: ' + eid, 'always');
-  
+
+  //
+  if(referenceFrame !== undefined) {
+    log('asd', 'always');
+  }
+
   // run the alert command
   exec(alertcmd, puts);
 }
