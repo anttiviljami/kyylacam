@@ -25,6 +25,7 @@ var verbose = args.indexOf('-v') != -1
 
 var motion;
 var frames = [];
+var eid;
 
 /*
  * Config
@@ -32,6 +33,7 @@ var frames = [];
 var motioncmd = 'motion';
 var motionconf = './motion.conf';
 var comparecmd = 'compare -metric AE -fuzz 20% %s %s null';
+var alertcmd = '/bin/bash ./alert.sh';
 
 /*
  * Initalization 
@@ -146,7 +148,7 @@ function onMovementEnd(response) {
  */
 function onPictureSave(response) {
   
-  var eid = parseInt(response.eventid);
+  eid = parseInt(response.eventid);
   if(frames[eid] === undefined) {
     frames[eid] = [];
     var compare = eid > 1;
@@ -170,14 +172,40 @@ function onPictureSave(response) {
  * Compares two images and outputs the distortion
  */
 function compareFrames(before, after) {
+  log('Comparing frames...', 'always');
   //log('before:' + before, 'always');
   //log('after:' + after, 'always');
   var cmd = util.format(comparecmd, before, after);
   
   //log(cmd, 'always');
-  exec(cmd, puts);
+  exec(cmd, function(error, stdout, stderr) {
+    var result = parseInt(stderr + '');
+
+    log('Distortion: ' + result, 'always');
+
+    if(result > 0) {
+      // scene has changed, run alert
+      onSceneChange(); 
+    } 
+
+    else {
+      // scene hasn't changed
+      log('No changes to scene detected.', 'always');
+    }
+    // puts(error, stdout, stderr);
+  });
 }
 
+/*
+ * When a scene change has been detected
+ */
+function onSceneChange() {
+  log('Scene change detected!', 'always');
+  log('Event: ' + eid, 'always');
+  
+  // run the alert command
+  exec(alertcmd, puts);
+}
 
 /*
  * Helper function that can be passed to exec calls for verbose output
@@ -186,7 +214,7 @@ function puts(error, stdout, stderr) {
   if(stdout.length)
     process.stdout.write(stdout);
   if(stderr.length)
-    process.stderr.write(stderr);
+    process.stderr.write('Error: ' + stderr);
   if (error !== null) 
     log(error, 'always');
 }
@@ -209,7 +237,7 @@ function exitHandler(options, err) {
 
   // clean up
   if (options.cleanup) {
-    // stop the motion daemon
+    // stop the motion child process
     log('Stopping motion tracking and exiting...')
     motion.kill();
     process.exit();
