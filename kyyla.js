@@ -13,69 +13,85 @@ var child_process = require('child_process'),
     exec = child_process.exec,
     spawn = child_process.spawn;
 
+var _ = require('underscore');
+var rmdir = require('rimraf');
+
 /*
  * Global variables
  */
 var args = process.argv;
 var verbose = args.indexOf('-v') != -1
             || args.indexOf('--verbose') != -1;
-var motion;
 
+var motion;
+var frames = [];
 
 /*
  * Config
  */
-var motioncmd = '/usr/bin/motion';
+var motioncmd = 'motion';
 var motionconf = './motion.conf';
-
+var comparecmd = 'compare -metric AE -fuzz 20% %s %s null';
 
 /*
  * Initalization 
  */
 function init() {
-  console.log('Kyyla server starting...');
+  log('Kyyla server starting...', 'always');
   
   // leave process running after script execution
   process.stdin.resume();
+
+  // clear old captures
+  rmdir('capture', function(error){});
 
   // start motion
   startMotion();
 }
 
-/*
- * Helper function that can be passed to exec calls for verbose output
- */
-function puts(error, stdout, stderr) { 
-  console.log(stderr);
-  if (error !== null) {
-    console.log('exec error: ' + error);
-  }
-}
 
 /*
  * Launches motion tracking
  */
-function startMotion(callback) {
-  console.log('Starting motion...');
+function startMotion() {
+  log('Starting motion tracking...', 'always');
   
-  // spawn child process
+  // spawn a motion child process
   motion = spawn(
     motioncmd, 
     ['-c', motionconf]
   );
 
-  // event handlers for motion
+  // event handlers for motion triggered by output
   motion.stdout.on('data', function (data) {
     
     if(verbose)
         process.stdout.write(data);
-    
-    if(/event_start/.test(data)) {
-      onMovementStart();
+
+    try {
+      var response = JSON.parse(data + '');
     }
 
-    if(/event_end/.test(data)) {
-      onMovementEnd();
+    catch (e) {
+      process.stderr.write('Is the JSON valid?: ' + data);
+    }
+
+    if(response.action === 'event_start') {
+      // trigger onMovementStart event
+      onMovementStart(response);
+    }
+
+    if(response.action ===  'event_end') {
+      // trigger onMovementEnd event
+      onMovementEnd(response);
+    }
+
+    if(response.action ===  'motion_detected') {
+      // 
+    }
+
+    if(response.action ===  'picture_save') {
+      onPictureSave(response);
     }
     
   });
@@ -85,18 +101,21 @@ function startMotion(callback) {
     if(verbose)
       process.stderr.write(data);
     
+    // Motion has launched
     if(/Started\ stream\ webcam\ server/.test(data)) {
-      console.log("Ready.")
+      log("Ready.", 'always');
     }
 
-    if(/Permission denied/.test(data)) {
+    // An error has occured
+    if(/error/i.test(data)) {
       process.stderr.write(data);
-      console.log('Now exiting...');
+      log('Now exiting...', 'always');
       process.exit();
     }
 
   });
 
+  // TODO: does this work?
   motion.on('close', function (code) {
     process.stderr.write('motion exited with code ' + code + '\r');
     process.exit();
@@ -104,18 +123,80 @@ function startMotion(callback) {
 
 }
 
+
 /*
  * Triggers when movement begins
  */
-function onMovementStart() {
-  console.log("Motion Started!");
+function onMovementStart(response) {
+  log('Motion Started!', 'always');
+  log('Event: ' + response.eventid, 'always')
 }
+
 
 /*
  * No movement for x amount of seconds
  */
-function onMovementEnd() {
-  console.log("Motion Ended");
+function onMovementEnd(response) {
+  log('Motion Ended', 'always');
+  log('Event: ' + response.eventid, 'always')
+}
+
+/*
+ * Triggers when a picture is saved
+ */
+function onPictureSave(response) {
+  
+  var eid = parseInt(response.eventid);
+  if(frames[eid] === undefined) {
+    frames[eid] = [];
+    var compare = eid > 1;
+  }
+
+  frames[eid].push(response.img);
+  log('Image captured: ' + _.last(frames[eid]), 'always');
+  log('Event: ' + response.eventid, 'always');
+
+  if(compare) {
+    // compare first frames of previous and current events
+    compareFrames(_.first(frames[eid - 1]), _.first(frames[eid]));
+
+    // drop the snapshot comparison frame
+    frames[eid].splice(0, 1);
+  }
+  
+}
+
+/*
+ * Compares two images and outputs the distortion
+ */
+function compareFrames(before, after) {
+  //log('before:' + before, 'always');
+  //log('after:' + after, 'always');
+  var cmd = util.format(comparecmd, before, after);
+  
+  //log(cmd, 'always');
+  exec(cmd, puts);
+}
+
+
+/*
+ * Helper function that can be passed to exec calls for verbose output
+ */
+function puts(error, stdout, stderr) { 
+  if(stdout.length)
+    process.stdout.write(stdout);
+  if(stderr.length)
+    process.stderr.write(stderr);
+  if (error !== null) 
+    log(error, 'always');
+}
+
+/*
+ * Verbose mode dependant logging
+ */
+function log(input, mode) {
+  if (verbose || mode === 'always')
+    console.log(input);
 }
 
 /*
@@ -129,13 +210,14 @@ function exitHandler(options, err) {
   // clean up
   if (options.cleanup) {
     // stop the motion daemon
-    console.log('Stopping motion and exiting...')
+    log('Stopping motion tracking and exiting...')
     motion.kill();
     process.exit();
   }
   
-  if (err) console.log(err.stack);
+  if (err) log(err.stack);
   if (options.exit) process.exit();
 }
 
 init();
+
