@@ -12,6 +12,7 @@ var util = require('util');
 var child_process = require('child_process'),
     exec = child_process.exec,
     spawn = child_process.spawn;
+var readline = require('readline');
 
 var _ = require('underscore');
 var hid = require('hidstream');
@@ -48,6 +49,14 @@ var frames = [];
 var referenceFrame;
 
 /*
+ * Accepted command line instructions
+ */ 
+var commands = {
+  'setref': setReference,
+};
+
+
+/*
  * Initalization 
  */
 function init() {
@@ -62,12 +71,39 @@ function init() {
   // TODO: start a http fileserver for serving capture images
   // console.log('Kyyla server listening on port 80.');
 
+  readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: completer,
+  }).on('line', onReadLine);
+
   // init keyboard
   if(hid.getDevices().length) 
     initKeyboard(hid.getDevices()[0].path);
 
   // start motion
   startMotion();
+}
+
+
+/*
+ * Reads lines from console
+ */
+function onReadLine(stdin) {
+  log(stdin);
+  if(typeof commands[stdin] === 'function') {
+    commands[stdin]();
+  }
+}
+
+
+/*
+ * Autocomplete lines from console
+ */
+function completer(stdin) {
+  var completions = Object.keys(commands);
+  var hits = completions.filter(function(c) { return c.indexOf(stdin) == 0 });
+  return [hits.length ? hits : [], stdin];
 }
 
 /*
