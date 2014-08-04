@@ -12,3 +12,9 @@ cd kyylacam
 npm install
 sudo ./kyyla 
 ```
+
+Prerequisites
+-------------
+
+You need to have node.js, npm, motion and ImageMagick installed, running on a Linux box.
+
