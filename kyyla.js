@@ -299,8 +299,8 @@ function onSceneChange(after) {
     compareFramesRef(referenceFrame, after, referenceFuzz);
   }
   else {
-    log('Reference frame not set. Proceeding...');
-    log('Keypress ' + resetkey + ' required on host to set reference frame.')
+    log('Reference frame not set but a change in scene has occured. Proceeding...', 'always');
+    log('Keypress ' + resetkey + ' required on host to set reference frame.', 'always');
   }
 
 }
