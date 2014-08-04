@@ -94,6 +94,9 @@ function onReadLine(stdin) {
   if(typeof commands[stdin] === 'function') {
     commands[stdin]();
   }
+  else {
+    log('Command ' + stdin + ' not found.', 'always');
+  }
 }
 
 
